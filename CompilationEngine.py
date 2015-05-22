@@ -31,11 +31,13 @@ class CompilationEngine:
     def __init__(self, inputPath, outputPath):
         self.tokenizer = Tokenizer(inputPath)
         self.outputFile = open(outputPath, 'w')
+        self.codeFile = open("{0}.vm".format(outputPath), 'w')
         self.tokenizer.advance()
         self.indentLevel = 0
     
         self.symbolTables = []
         self.currentSymbolTableEntry = None
+        self.currentClassName = None
 
     def CompileClass(self):
         """
@@ -46,7 +48,7 @@ class CompilationEngine:
 
         self.SetCurrentSymbolTableEntry("class")
         self.ConsumeKeyword([Keyword.CLASS])
-        self.ConsumeIdentifier()  # className
+        self.currentClassName = self.ConsumeIdentifier()  # className
         self.ConsumeSymbol('{')
 
         while (self.IsKeyword([Keyword.STATIC, Keyword.FIELD])):
@@ -97,11 +99,13 @@ class CompilationEngine:
         else:
             self.ConsumeType()
 
-        self.ConsumeIdentifier()  # subroutineName
+        subName = self.ConsumeIdentifier()  # subroutineName
 
         self.ConsumeSymbol('(')
-        self.CompileParameterList()
+        nVars = self.CompileParameterList()
         self.ConsumeSymbol(')')
+
+        self.WriteCode("function {0}.{1} {2}".format(self.currentClassName, subName, str(nVars)))
 
         self.CompileSubroutineBody()
         
@@ -129,19 +133,24 @@ class CompilationEngine:
         not including the enclosing "()".
         """
         self.EnterScope("parameterList")
+        nVars = 0
 
         if (not self.IsSymbol([')'])):
             self.ConsumeType()
             self.SetCurrentSymbolTableEntry("argument")            
             self.ConsumeIdentifier()
+            nVars+=1
 
         while(self.IsSymbol([','])):
             self.ConsumeSymbol(',')
             self.ConsumeType()
             self.SetCurrentSymbolTableEntry("argument")
             self.ConsumeIdentifier()
+            nVars+=1
 
         self.ExitScope("parameterList")
+
+        return nVars
 
     def CompileVarDec(self):
         """
@@ -193,16 +202,17 @@ class CompilationEngine:
         Compiles a do statement.
         """
         self.EnterScope("doStatement")
-
         self.ConsumeKeyword([Keyword.DO])
-        self.ConsumeIdentifier()
+        callee = self.ConsumeIdentifier()
         if self.IsSymbol(['.']):
             self.ConsumeSymbol('.')
-            self.ConsumeIdentifier()
+            callee = "{0}.{1}".format(callee ,self.ConsumeIdentifier())
         self.ConsumeSymbol('(')
-        self.CompileExpressionList()
+        nArgs = self.CompileExpressionList()
         self.ConsumeSymbol(')')
         self.ConsumeSymbol(';')
+        
+        self.WriteCode("call {0} {1}".format(callee, nArgs))
 
         self.ExitScope("doStatement")
 
@@ -252,6 +262,8 @@ class CompilationEngine:
             self.CompileExpression()
         self.ConsumeSymbol(';')
 
+        self.WriteCode("return")
+
         self.ExitScope("returnStatement")
 
     def CompileIf(self):
@@ -285,7 +297,7 @@ class CompilationEngine:
         self.EnterScope("expression")
 
         op_symbols = ['+', '-', '*', '/', '&amp;', '|', "&lt;", "&gt;", '=']
-        self.CompileTerm()
+        self.WriteCode("push constant {0}".format(self.CompileTerm()))
         while (self.IsSymbol(op_symbols)):
             self.ConsumeSymbol(self.tokenizer.symbol())
             self.CompileTerm()
@@ -297,13 +309,15 @@ class CompilationEngine:
         Compiles a term.
         """
         self.EnterScope("term")
+        
+        retVal = None
 
         keyword_constants = [Keyword.TRUE, Keyword.FALSE, Keyword.NULL,
                              Keyword.THIS]
         unary_symbols = ['-', '~']
 
         if self.IsType(TokenType.INT_CONST):
-            self.ConsumeIntegerConstant()
+            retVal = self.ConsumeIntegerConstant()
 
         elif self.IsType(TokenType.STRING_CONST):
             self.ConsumeStringConstant()
@@ -338,21 +352,27 @@ class CompilationEngine:
 
         self.ExitScope("term")
 
+        return retVal
+
     def CompileExpressionList(self):
         """
         Compiles a (possibly empty) comma-separated
         list of expressions.
         """
         self.EnterScope("expressionList")
-
+        nArgs = 0
         if not self.IsSymbol(')'):
             self.CompileExpression()
+            nArgs+=1
 
         while self.IsSymbol([',']):
             self.ConsumeSymbol(',')
             self.CompileExpression()
+            nArgs+=1
 
         self.ExitScope("expressionList")
+    
+        return nArgs
 
     def IsKeyword(self, keyword_list):
         return (self.IsType(TokenType.KEYWORD) and
@@ -367,9 +387,9 @@ class CompilationEngine:
 
     def ConsumeType(self):
         if (self.tokenizer.tokenType() == TokenType.IDENTIFIER):
-            self.ConsumeIdentifier()
+            return self.ConsumeIdentifier()
         else:
-            self.ConsumeKeyword([Keyword.INT, Keyword.CHAR, Keyword.BOOLEAN])
+            return self.ConsumeKeyword([Keyword.INT, Keyword.CHAR, Keyword.BOOLEAN])
 
     def ConsumeKeyword(self, keywordList):
         self.VerifyTokenType(TokenType.KEYWORD)
@@ -382,6 +402,8 @@ class CompilationEngine:
         if self.tokenizer.hasMoreTokens():
             self.tokenizer.advance()
 
+        return actual
+
     def ConsumeSymbol(self, symbol):
         self.VerifyTokenType(TokenType.SYMBOL)
         actual = self.tokenizer.symbol()
@@ -391,18 +413,26 @@ class CompilationEngine:
         self.OutputTag("symbol", actual)
         if self.tokenizer.hasMoreTokens():
             self.tokenizer.advance()
+        
+        return actual
 
     def ConsumeIntegerConstant(self):
         self.VerifyTokenType(TokenType.INT_CONST)
+        actual = self.tokenizer.intVal()
         self.OutputTag("integerConstant", self.tokenizer.intVal())
         if self.tokenizer.hasMoreTokens():
             self.tokenizer.advance()
+        
+        return actual
 
     def ConsumeStringConstant(self):
         self.VerifyTokenType(TokenType.STRING_CONST)
+        actual = self.tokenizer.stringVal()
         self.OutputTag("stringConstant", self.tokenizer.stringVal())
         if self.tokenizer.hasMoreTokens():
             self.tokenizer.advance()
+        
+        return actual
     
     def IsIdentifierBeingDefined(self):
         return self.currentSymbolTableEntry != None
@@ -435,12 +465,15 @@ class CompilationEngine:
  
     def ConsumeIdentifier(self):
         self.VerifyTokenType(TokenType.IDENTIFIER)
+        actual = self.tokenizer.identifier()
         self.OutputTag("identifierName", self.tokenizer.identifier())
         
         self.OutputIdentifierDetails()
 
         if self.tokenizer.hasMoreTokens():
             self.tokenizer.advance()
+        
+        return actual
 
     def VerifyTokenType(self, tokenType):
         actual = self.tokenizer.tokenType()
@@ -469,6 +502,9 @@ class CompilationEngine:
                 return entry
         return None
 
+    def WriteCode(self, line):
+        self.codeFile.write(line + '\n')
+
     def OutputTag(self, tag, value):
         self.Output("<{}> {} </{}>".format(tag, value, tag))
 
@@ -495,6 +531,8 @@ def main(args):
 
     engine = CompilationEngine(inputPath, outputPath)
     engine.CompileClass()
+
+    #engine.WriteCode("call Main.main 0")
 
 if __name__ == '__main__':
     main(sys.argv[1:])
