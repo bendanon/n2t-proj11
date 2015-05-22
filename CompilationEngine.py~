@@ -26,7 +26,6 @@ class Keyword:
     NULL = 'null'
     THIS = 'this'
 
-
 class CompilationEngine:
     def __init__(self, inputPath, outputPath):
         self.tokenizer = Tokenizer(inputPath)
@@ -36,6 +35,7 @@ class CompilationEngine:
     
         self.symbolTables = []
         self.currentSymbolTableEntry = None
+        self.currentClassName = None
 
     def CompileClass(self):
         """
@@ -43,10 +43,9 @@ class CompilationEngine:
         """
         self.EnterScope("class")
         self.symbolTables.append(SymbolTable())
-
+        self.currentClassName = self.tokenizer.identifier()
         self.SetCurrentSymbolTableEntry("class")
         self.ConsumeKeyword([Keyword.CLASS])
-        self.ConsumeIdentifier()  # className
         self.ConsumeSymbol('{')
 
         while (self.IsKeyword([Keyword.STATIC, Keyword.FIELD])):
