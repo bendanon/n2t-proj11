@@ -46,7 +46,6 @@ class CompilationEngine:
 
         self.SetCurrentSymbolTableEntry("class")
         self.ConsumeKeyword([Keyword.CLASS])
-        self.ConsumeIdentifier()  # className
         self.ConsumeSymbol('{')
 
         while (self.IsKeyword([Keyword.STATIC, Keyword.FIELD])):
@@ -403,37 +402,41 @@ class CompilationEngine:
         self.OutputTag("stringConstant", self.tokenizer.stringVal())
         if self.tokenizer.hasMoreTokens():
             self.tokenizer.advance()
+    
+    def IsIdentifierBeingDefined(self):
+        return self.currentSymbolTableEntry != None
 
+    def FinishIdentifierDefinition(self):   
+        self.currentSymbolTableEntry.SetName(self.tokenizer.identifier())
+        self.GetTopSymbolTable().InsertEntry(self.currentSymbolTableEntry)
+        self.currentSymbolTableEntry = None        
+    
+    def OutputIdentifierDetails(self):
+
+        self.EnterScope("identifierDetails=========")
+
+        self.OutputTag("beingDefined", str(self.IsIdentifierBeingDefined()))
+
+        if self.IsIdentifierBeingDefined():
+            self.FinishIdentifierDefinition()
+
+        entry = self.SymbolTableLookup(self.tokenizer.identifier())
+
+        if entry != None:
+            if CategoryUtils.IsIndexed(entry.category):
+                self.OutputTag("index", self.GetTopSymbolTable().SymbolIndex(entry.name))
+            self.OutputTag("identifierCategory", CategoryUtils.ToString(entry.category))
+        else:
+            self.OutputTag("identifierCategory", "no definition present")
+            self.OutputTag("index", "no definition present")
+
+        self.ExitScope("identifierDetails=========")
+ 
     def ConsumeIdentifier(self):
         self.VerifyTokenType(TokenType.IDENTIFIER)
         self.OutputTag("identifierName", self.tokenizer.identifier())
         
-        beingDefinedFlag = False        
-        entry = self.currentSymbolTableEntry
-        if entry == None:
-            entry = self.SymbolTableLookup(self.tokenizer.identifier())
-            if entry != None:
-                print "retrieved entry " + entry.name
-            else:
-                print "retrieved none for " + self.tokenizer.identifier() 
-        else:
-            beingDefinedFlag = True
-            entry.SetName(self.tokenizer.identifier())
-            self.GetTopSymbolTable().InsertEntry(entry)
-            self.currentSymbolTableEntry = None        
-
-        self.OutputTag("beingDefined", str(beingDefinedFlag))
-        if entry != None:
-            self.OutputTag("identifierCategory", CategoryUtils.ToString(entry.category))
-        else:
-            self.OutputTag("identifierCategory", "no definition present")
-        
-        if entry != None:
-            if CategoryUtils.IsIndexed(entry.category):
-                self.OutputTag("index", self.GetTopSymbolTable().SymbolIndex(entry.name))
-        else:
-            self.OutputTag("index", "no definition present")
-            
+        self.OutputIdentifierDetails()
 
         if self.tokenizer.hasMoreTokens():
             self.tokenizer.advance()
