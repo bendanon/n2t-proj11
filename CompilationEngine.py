@@ -1,4 +1,5 @@
 from JackTokenizer import TokenType, Tokenizer
+from SymbolTable import SymbolTable, CategoryUtils, SymbolTableEntry
 import sys
 
 
@@ -32,13 +33,18 @@ class CompilationEngine:
         self.outputFile = open(outputPath, 'w')
         self.tokenizer.advance()
         self.indentLevel = 0
+    
+        self.symbolTables = []
+        self.currentSymbolTableEntry = None
 
     def CompileClass(self):
         """
         Compiles a complete class.
         """
         self.EnterScope("class")
+        self.symbolTables.append(SymbolTable())
 
+        self.SetCurrentSymbolTableEntry("class")
         self.ConsumeKeyword([Keyword.CLASS])
         self.ConsumeIdentifier()  # className
         self.ConsumeSymbol('{')
@@ -53,6 +59,7 @@ class CompilationEngine:
 
         self.ConsumeSymbol('}')
 
+        self.symbolTables.pop()
         self.ExitScope("class")
         self.outputFile.close()
 
@@ -62,6 +69,7 @@ class CompilationEngine:
         """
         self.EnterScope("classVarDec")
 
+        self.SetCurrentSymbolTableEntry(self.tokenizer.keyword())
         self.ConsumeKeyword([Keyword.STATIC, Keyword.FIELD])
         self.ConsumeType()
         self.ConsumeIdentifier()  # varName
@@ -79,7 +87,9 @@ class CompilationEngine:
         Compiles a complete method, function, or constructor.
         """
         self.EnterScope("subroutineDec")
+        self.symbolTables.append(SymbolTable())
 
+        self.SetCurrentSymbolTableEntry(self.tokenizer.keyword())
         self.ConsumeKeyword([Keyword.CONSTRUCTOR, Keyword.FUNCTION,
                              Keyword.METHOD])
         if (self.IsKeyword([Keyword.VOID])):
@@ -94,7 +104,8 @@ class CompilationEngine:
         self.ConsumeSymbol(')')
 
         self.CompileSubroutineBody()
-
+        
+        self.symbolTables.pop()
         self.ExitScope("subroutineDec")
 
     def CompileSubroutineBody(self):
@@ -108,6 +119,10 @@ class CompilationEngine:
 
         self.ExitScope("subroutineBody")
 
+    def SetCurrentSymbolTableEntry(self, category):
+        self.currentSymbolTableEntry = SymbolTableEntry()
+        self.currentSymbolTableEntry.SetCategory(category)        
+
     def CompileParameterList(self):
         """
         Compiles a (possibly empty) parameter list,
@@ -117,11 +132,13 @@ class CompilationEngine:
 
         if (not self.IsSymbol([')'])):
             self.ConsumeType()
+            self.SetCurrentSymbolTableEntry("argument")            
             self.ConsumeIdentifier()
 
         while(self.IsSymbol([','])):
             self.ConsumeSymbol(',')
             self.ConsumeType()
+            self.SetCurrentSymbolTableEntry("argument")
             self.ConsumeIdentifier()
 
         self.ExitScope("parameterList")
@@ -134,11 +151,13 @@ class CompilationEngine:
 
         self.ConsumeKeyword([Keyword.VAR])
         self.ConsumeType()
+        self.SetCurrentSymbolTableEntry("var")
         self.ConsumeIdentifier()  # varName
         while (self.IsSymbol([','])):
-            self.ConsumeSymbol(',')
+            self.ConsumeSymbol(',') 
+            self.SetCurrentSymbolTableEntry("var")
             self.ConsumeIdentifier()  # varName
-
+        
         self.ConsumeSymbol(';')
 
         self.ExitScope("varDec")
@@ -358,6 +377,7 @@ class CompilationEngine:
         if actual not in keywordList:
             raise Exception("Expected keywords: {}, Actual: {}".
                             format(keywordList, actual))
+
         self.OutputTag("keyword", actual)
         if self.tokenizer.hasMoreTokens():
             self.tokenizer.advance()
@@ -386,7 +406,35 @@ class CompilationEngine:
 
     def ConsumeIdentifier(self):
         self.VerifyTokenType(TokenType.IDENTIFIER)
-        self.OutputTag("identifier", self.tokenizer.identifier())
+        self.OutputTag("identifierName", self.tokenizer.identifier())
+        
+        beingDefinedFlag = False        
+        entry = self.currentSymbolTableEntry
+        if entry == None:
+            entry = self.SymbolTableLookup(self.tokenizer.identifier())
+            if entry != None:
+                print "retrieved entry " + entry.name
+            else:
+                print "retrieved none for " + self.tokenizer.identifier() 
+        else:
+            beingDefinedFlag = True
+            entry.SetName(self.tokenizer.identifier())
+            self.GetTopSymbolTable().InsertEntry(entry)
+            self.currentSymbolTableEntry = None        
+
+        self.OutputTag("beingDefined", str(beingDefinedFlag))
+        if entry != None:
+            self.OutputTag("identifierCategory", CategoryUtils.ToString(entry.category))
+        else:
+            self.OutputTag("identifierCategory", "no definition present")
+        
+        if entry != None:
+            if CategoryUtils.IsIndexed(entry.category):
+                self.OutputTag("index", self.GetTopSymbolTable().SymbolIndex(entry.name))
+        else:
+            self.OutputTag("index", "no definition present")
+            
+
         if self.tokenizer.hasMoreTokens():
             self.tokenizer.advance()
 
@@ -403,6 +451,19 @@ class CompilationEngine:
     def ExitScope(self, name):
         self.indentLevel -= 1
         self.Output("</{}>".format(name))
+
+    def GetTopSymbolTable(self):
+        if len(self.symbolTables) != 0:
+            return self.symbolTables[len(self.symbolTables) - 1]
+        else:
+            return None
+
+    def SymbolTableLookup(self, name):
+        for st in reversed(self.symbolTables):
+            entry = st.GetEntry(name)
+            if entry != None:
+                return entry
+        return None
 
     def OutputTag(self, tag, value):
         self.Output("<{}> {} </{}>".format(tag, value, tag))
