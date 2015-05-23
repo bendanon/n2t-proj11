@@ -39,46 +39,6 @@
         <symbol> ; </symbol>
       </varDec>
       <statements>
-        <doStatement>
-          <keyword> do </keyword>
-          <identifierName> Main </identifierName>
-          <identifierDetails=========>
-            <beingDefined> False </beingDefined>
-            <identifierCategory> class </identifierCategory>
-          </identifierDetails=========>
-          <symbol> . </symbol>
-          <identifierName> fillMemory </identifierName>
-          <identifierDetails=========>
-            <beingDefined> False </beingDefined>
-            <identifierCategory> no definition present </identifierCategory>
-            <index> no definition present </index>
-          </identifierDetails=========>
-          <symbol> ( </symbol>
-          <expressionList>
-            <expression>
-              <term>
-                <integerConstant> 8001 </integerConstant>
-              </term>
-            </expression>
-            <symbol> , </symbol>
-            <expression>
-              <term>
-                <integerConstant> 16 </integerConstant>
-              </term>
-            </expression>
-            <symbol> , </symbol>
-            <expression>
-              <term>
-                <symbol> - </symbol>
-                <term>
-                  <integerConstant> 1 </integerConstant>
-                </term>
-              </term>
-            </expression>
-          </expressionList>
-          <symbol> ) </symbol>
-          <symbol> ; </symbol>
-        </doStatement>
         <letStatement>
           <keyword> let </keyword>
           <identifierName> value </identifierName>

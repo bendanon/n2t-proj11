@@ -30,6 +30,8 @@ class Keyword:
 op_symbols = {'+' : 'add', '-' : 'sub', '*' : 'call Math.multiply 2', '/' : 'call Math.divide 2', '&amp;' : 'and' , '|' : 'or', "&lt;" : 'lt' , "&gt;" : 'gt', '=' : 'eq'}
 unary_symbols = {'-' : 'neg', '~' : 'not'}
 
+keyword_to_constant = {Keyword.TRUE : '1', Keyword.FALSE : '0', Keyword.NULL : '0'}
+
 class CompilationEngine:
     def __init__(self, inputPath, outputPath):
         self.tokenizer = Tokenizer(inputPath)
@@ -41,6 +43,11 @@ class CompilationEngine:
         self.symbolTables = []
         self.currentSymbolTableEntry = None
         self.currentClassName = None
+        self.uniqueLabelIndex = 0
+
+    def GenerateUniqueLabel(self):
+        self.uniqueLabelIndex+=1
+        return "pfl{0}".format(self.uniqueLabelIndex-1)
 
     def CompileClass(self):
         """
@@ -253,13 +260,31 @@ class CompilationEngine:
         self.EnterScope("whileStatement")
 
         self.ConsumeKeyword([Keyword.WHILE])
+        L1 = self.GenerateUniqueLabel()
+        L2 = self.GenerateUniqueLabel()
+        
+        #While entry point
+        self.WriteCode("label {0}".format(L1))
+
+        #while loop condition
         self.ConsumeSymbol('(')
         self.CompileExpression()
         self.ConsumeSymbol(')')
+        
+        #Jump to L2 if condition doesn't hold
+        self.WriteCode("not")
+        self.WriteCode("if-goto {0}".format(L2))
 
+        #While loop logic
         self.ConsumeSymbol('{')
         self.CompileStatements()
         self.ConsumeSymbol('}')
+        
+        #Go back to L1 for another iteration
+        self.WriteCode("goto {0}".format(L1))
+
+        #While termination point
+        self.WriteCode("label {0}".format(L2))
 
         self.ExitScope("whileStatement")
 
@@ -286,19 +311,34 @@ class CompilationEngine:
         self.EnterScope("ifStatement")
 
         self.ConsumeKeyword([Keyword.IF])
+        L1 = self.GenerateUniqueLabel()
+        L2 = self.GenerateUniqueLabel()
+        
+        #The if statement condition
         self.ConsumeSymbol('(')
         self.CompileExpression()
         self.ConsumeSymbol(')')
+        
+        #Jump to L1 if condition doesn't hold
+        self.WriteCode("not")
+        self.WriteCode("if-goto {0}".format(L1))
 
         self.ConsumeSymbol('{')
         self.CompileStatements()
         self.ConsumeSymbol('}')
-
+        
+        #Done
+        self.WriteCode("goto {0}".format(L2))
+        
+        self.WriteCode("label {0}".format(L1))
         if self.IsKeyword([Keyword.ELSE]):
             self.ConsumeKeyword([Keyword.ELSE])
             self.ConsumeSymbol('{')
             self.CompileStatements()
             self.ConsumeSymbol('}')
+        
+        self.WriteCode("label {0}".format(L2))
+            
 
         self.ExitScope("ifStatement")
 
@@ -334,7 +374,9 @@ class CompilationEngine:
             self.ConsumeStringConstant()
 
         elif self.IsKeyword(keyword_constants):
-                self.ConsumeKeyword(keyword_constants)
+                keyword = self.ConsumeKeyword(keyword_constants)
+                if keyword in keyword_to_constant.keys():
+                    self.WriteCode("push constant {0}".format(keyword_to_constant[keyword]))
 
         elif self.IsSymbol(['(']):
             self.ConsumeSymbol('(')
