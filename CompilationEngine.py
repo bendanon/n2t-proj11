@@ -27,6 +27,8 @@ class Keyword:
     THIS = 'this'
 
 
+op_symbols = {'+' : 'add', '-' : 'sub', '*' : 'call Math.multiply 2', '/' : 'call Math.divide 2', '&amp;' : 'and' , '|' : 'or', "&lt;" : 'lt' , "&gt;" : 'gt', '=' : 'eq'}
+
 class CompilationEngine:
     def __init__(self, inputPath, outputPath):
         self.tokenizer = Tokenizer(inputPath)
@@ -296,28 +298,29 @@ class CompilationEngine:
         """
         self.EnterScope("expression")
 
-        op_symbols = ['+', '-', '*', '/', '&amp;', '|', "&lt;", "&gt;", '=']
-        self.WriteCode("push constant {0}".format(self.CompileTerm()))
-        while (self.IsSymbol(op_symbols)):
-            self.ConsumeSymbol(self.tokenizer.symbol())
+        self.CompileTerm()
+        while (self.IsSymbol(op_symbols.keys())):
+            op = self.ConsumeSymbol(self.tokenizer.symbol())
             self.CompileTerm()
+            self.WriteCode(op_symbols[op])
 
         self.ExitScope("expression")
-
+    
+        
     def CompileTerm(self):
         """
         Compiles a term.
         """
         self.EnterScope("term")
-        
-        retVal = None
 
         keyword_constants = [Keyword.TRUE, Keyword.FALSE, Keyword.NULL,
                              Keyword.THIS]
         unary_symbols = ['-', '~']
 
+        
+        
         if self.IsType(TokenType.INT_CONST):
-            retVal = self.ConsumeIntegerConstant()
+            self.WriteCode("push constant {0}".format(self.ConsumeIntegerConstant()))
 
         elif self.IsType(TokenType.STRING_CONST):
             self.ConsumeStringConstant()
@@ -351,8 +354,6 @@ class CompilationEngine:
                 self.ConsumeSymbol(')')
 
         self.ExitScope("term")
-
-        return retVal
 
     def CompileExpressionList(self):
         """
