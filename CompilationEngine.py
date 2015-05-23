@@ -28,6 +28,7 @@ class Keyword:
 
 
 op_symbols = {'+' : 'add', '-' : 'sub', '*' : 'call Math.multiply 2', '/' : 'call Math.divide 2', '&amp;' : 'and' , '|' : 'or', "&lt;" : 'lt' , "&gt;" : 'gt', '=' : 'eq'}
+unary_symbols = {'-' : 'neg', '~' : 'not'}
 
 class CompilationEngine:
     def __init__(self, inputPath, outputPath):
@@ -104,22 +105,24 @@ class CompilationEngine:
         subName = self.ConsumeIdentifier()  # subroutineName
 
         self.ConsumeSymbol('(')
-        nVars = self.CompileParameterList()
+        self.CompileParameterList()
         self.ConsumeSymbol(')')
 
-        self.WriteCode("function {0}.{1} {2}".format(self.currentClassName, subName, str(nVars)))
-
-        self.CompileSubroutineBody()
+        self.CompileSubroutineBody(subName)
         
         self.symbolTables.pop()
         self.ExitScope("subroutineDec")
 
-    def CompileSubroutineBody(self):
+    def CompileSubroutineBody(self, subName):
         self.EnterScope("subroutineBody")
 
+        nVars=0
         self.ConsumeSymbol('{')
         while (self.IsKeyword([Keyword.VAR])):
-            self.CompileVarDec()
+            nVars+=self.CompileVarDec()
+
+        self.WriteCode("function {0}.{1} {2}".format(self.currentClassName, subName, str(nVars)))
+
         self.CompileStatements()
         self.ConsumeSymbol('}')
 
@@ -159,19 +162,23 @@ class CompilationEngine:
         Compiles a var declaration.
         """
         self.EnterScope("varDec")
-
+        nVars = 0
         self.ConsumeKeyword([Keyword.VAR])
         self.ConsumeType()
         self.SetCurrentSymbolTableEntry("var")
         self.ConsumeIdentifier()  # varName
+        nVars+=1
         while (self.IsSymbol([','])):
             self.ConsumeSymbol(',') 
             self.SetCurrentSymbolTableEntry("var")
             self.ConsumeIdentifier()  # varName
+            nVars+=1
         
         self.ConsumeSymbol(';')
 
         self.ExitScope("varDec")
+
+        return nVars
 
     def CompileStatements(self):
         """
@@ -225,7 +232,7 @@ class CompilationEngine:
         self.EnterScope("letStatement")
 
         self.ConsumeKeyword([Keyword.LET])
-        self.ConsumeIdentifier()
+        varName = self.ConsumeIdentifier()
         if self.IsSymbol(['[']):
             self.ConsumeSymbol('[')
             self.CompileExpression()
@@ -233,8 +240,11 @@ class CompilationEngine:
         self.ConsumeSymbol('=')
         self.CompileExpression()
         self.ConsumeSymbol(';')
-
+    
         self.ExitScope("letStatement")
+        
+        entry = self.SymbolTableLookup(varName)
+        self.WriteCode("pop {0} {1}".format(entry.segment, entry.index))
 
     def CompileWhile(self):
         """
@@ -315,10 +325,8 @@ class CompilationEngine:
 
         keyword_constants = [Keyword.TRUE, Keyword.FALSE, Keyword.NULL,
                              Keyword.THIS]
-        unary_symbols = ['-', '~']
-
-        
-        
+        termName = None
+                
         if self.IsType(TokenType.INT_CONST):
             self.WriteCode("push constant {0}".format(self.ConsumeIntegerConstant()))
 
@@ -333,27 +341,36 @@ class CompilationEngine:
             self.CompileExpression()
             self.ConsumeSymbol(')')
 
-        elif self.IsSymbol(unary_symbols):
-            self.ConsumeSymbol(self.tokenizer.symbol())
+        elif self.IsSymbol(unary_symbols.keys()):
+            symbol = self.ConsumeSymbol(self.tokenizer.symbol())
             self.CompileTerm()
+            self.WriteCode(unary_symbols[symbol])
         else:
-            self.ConsumeIdentifier()
+            termName = self.ConsumeIdentifier()
+            entry = self.SymbolTableLookup(termName)
+            if entry != None:
+                if CategoryUtils.IsIndexed(entry.category):
+                    self.WriteCode("push {0} {1} //{2}".format(CategoryUtils.GetSegment(entry.category), entry.index, termName))
+            
             if self.IsSymbol(['[']):    # varName '[' expression ']'
                 self.ConsumeSymbol('[')
                 self.CompileExpression()
                 self.ConsumeSymbol(']')
             elif self.IsSymbol(['(']):  # subroutineCall
+                self.WriteCode("call {0}".format(termName))
                 self.ConsumeSymbol('(')
-                self.CompileExpressionList()
+                self.WriteCode("call {0} {1}".format(termName, self.CompileExpressionList()))
                 self.ConsumeSymbol(')')
             elif self.IsSymbol(['.']):
                 self.ConsumeSymbol('.')
-                self.ConsumeIdentifier()
+                funcName = self.ConsumeIdentifier()
                 self.ConsumeSymbol('(')
-                self.CompileExpressionList()
+                self.WriteCode("call {0}.{1} {2}".format(termName, funcName, self.CompileExpressionList()))
                 self.ConsumeSymbol(')')
 
         self.ExitScope("term")
+        
+        return termName
 
     def CompileExpressionList(self):
         """

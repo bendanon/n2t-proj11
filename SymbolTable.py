@@ -13,7 +13,7 @@ conversion = {"var" : Categories.VAR, "argument" : Categories.ARGUMENT ,"static"
 
 conversion_mirror = {Categories.VAR : "var", Categories.ARGUMENT : "argument" , Categories.STATIC : "static", Categories.FIELD : "field", Categories.CLASS : "class",Categories.SUBROUTINE : "subroutine"}
 
-indexed = [Categories.VAR, Categories.ARGUMENT, Categories.STATIC, Categories.FIELD]
+indexed = {Categories.VAR : "local" , Categories.ARGUMENT : "argument", Categories.STATIC : "static", Categories.FIELD : "this"}
 
 class CategoryUtils:
 
@@ -32,11 +32,15 @@ class CategoryUtils:
 
     @staticmethod
     def IsIndexed(category):
-        return category in indexed
+        return category in indexed.keys()
 
     @staticmethod
     def BelongsInSymbolTable(keyword):
         return keyword in conversion.keys()
+
+    @staticmethod
+    def GetSegment(category):        
+        return indexed[category]
 
 class SymbolTableEntry(object):
     
@@ -44,9 +48,12 @@ class SymbolTableEntry(object):
         self.name = None
         self.category = Categories.NONE
         self.index = -1
+        self.segment = None
     
     def SetCategory(self, categoryStr):
         self.category = CategoryUtils.FromString(categoryStr)
+        if CategoryUtils.IsIndexed(self.category):
+            self.segment = CategoryUtils.GetSegment(self.category)
         
     def SetName(self, name):
         self.name = name
