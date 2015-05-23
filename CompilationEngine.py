@@ -30,8 +30,6 @@ class Keyword:
 op_symbols = {'+' : 'add', '-' : 'sub', '*' : 'call Math.multiply 2', '/' : 'call Math.divide 2', '&amp;' : 'and' , '|' : 'or', "&lt;" : 'lt' , "&gt;" : 'gt', '=' : 'eq'}
 unary_symbols = {'-' : 'neg', '~' : 'not'}
 
-keyword_to_constant = {Keyword.TRUE : '1', Keyword.FALSE : '0', Keyword.NULL : '0'}
-
 class CompilationEngine:
     def __init__(self, inputPath, outputPath):
         self.tokenizer = Tokenizer(inputPath)
@@ -375,8 +373,11 @@ class CompilationEngine:
 
         elif self.IsKeyword(keyword_constants):
                 keyword = self.ConsumeKeyword(keyword_constants)
-                if keyword in keyword_to_constant.keys():
-                    self.WriteCode("push constant {0}".format(keyword_to_constant[keyword]))
+                if keyword == "false":
+                    self.WriteCode("push constant 0")
+                elif keyword == 'true':
+                    self.WriteCode("push constant 0")
+                    self.WriteCode("not")                
 
         elif self.IsSymbol(['(']):
             self.ConsumeSymbol('(')
