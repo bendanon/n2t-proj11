@@ -1,7 +1,7 @@
 from JackTokenizer import TokenType, Tokenizer
 from SymbolTable import SymbolTable, CategoryUtils, SymbolTableEntry
 import sys
-
+import os
 
 class Keyword:
     CLASS = 'class'
@@ -30,18 +30,23 @@ class Keyword:
 op_symbols = {'+' : 'add', '-' : 'sub', '*' : 'call Math.multiply 2', '/' : 'call Math.divide 2', '&amp;' : 'and' , '|' : 'or', "&lt;" : 'lt' , "&gt;" : 'gt', '=' : 'eq'}
 unary_symbols = {'-' : 'neg', '~' : 'not'}
 
+subroutine_types = [Keyword.CONSTRUCTOR, Keyword.FUNCTION, Keyword.METHOD]
+
 class CompilationEngine:
-    def __init__(self, inputPath, outputPath):
+    def __init__(self):
+        self.symbolTables = []
+        self.uniqueLabelIndex = 0
+    
+    def SetClass(self, inputPath, outputPath):
         self.tokenizer = Tokenizer(inputPath)
-        self.outputFile = open(outputPath, 'w')
-        self.codeFile = open("{0}.vm".format(outputPath), 'w')
+        self.outputFile = open("{0}.xml".format(outputPath), 'w')
+        self.codeFile = open(outputPath, 'w')
         self.tokenizer.advance()
         self.indentLevel = 0
-    
-        self.symbolTables = []
+        
         self.currentSymbolTableEntry = None
         self.currentClassName = None
-        self.uniqueLabelIndex = 0
+        self.currentSubName = None
 
     def GenerateUniqueLabel(self):
         self.uniqueLabelIndex+=1
@@ -54,17 +59,16 @@ class CompilationEngine:
         self.EnterScope("class")
         self.symbolTables.append(SymbolTable())
 
-        self.SetCurrentSymbolTableEntry("class")
         self.ConsumeKeyword([Keyword.CLASS])
-        self.currentClassName = self.ConsumeIdentifier()  # className
+        self.ConsumeDeclaration("class")
+
         self.ConsumeSymbol('{')
 
         while (self.IsKeyword([Keyword.STATIC, Keyword.FIELD])):
             self.CompileClassVarDec()
 
         # subroutineDec*
-        while (self.IsKeyword([Keyword.CONSTRUCTOR, Keyword.FUNCTION,
-                               Keyword.METHOD])):
+        while (self.IsKeyword(subroutine_types)):
             self.CompileSubroutine()
 
         self.ConsumeSymbol('}')
@@ -79,14 +83,14 @@ class CompilationEngine:
         """
         self.EnterScope("classVarDec")
 
-        self.SetCurrentSymbolTableEntry(self.tokenizer.keyword())
-        self.ConsumeKeyword([Keyword.STATIC, Keyword.FIELD])
+        category = self.tokenizer.keyword()
+        self.ConsumeKeyword([Keyword.STATIC, Keyword.FIELD])        
         self.ConsumeType()
-        self.ConsumeIdentifier()  # varName
+        self.ConsumeDeclaration(category)
 
         while (self.IsSymbol([','])):
             self.ConsumeSymbol(',')
-            self.ConsumeIdentifier()  # varName
+            self.ConsumeDeclaration(category)
 
         self.ConsumeSymbol(';')
 
@@ -99,7 +103,7 @@ class CompilationEngine:
         self.EnterScope("subroutineDec")
         self.symbolTables.append(SymbolTable())
 
-        self.SetCurrentSymbolTableEntry(self.tokenizer.keyword())
+        category = self.tokenizer.keyword()
         self.ConsumeKeyword([Keyword.CONSTRUCTOR, Keyword.FUNCTION,
                              Keyword.METHOD])
         if (self.IsKeyword([Keyword.VOID])):
@@ -107,18 +111,19 @@ class CompilationEngine:
         else:
             self.ConsumeType()
 
-        subName = self.ConsumeIdentifier()  # subroutineName
+        self.ConsumeDeclaration(category)
 
         self.ConsumeSymbol('(')
         self.CompileParameterList()
         self.ConsumeSymbol(')')
 
-        self.CompileSubroutineBody(subName)
+        #self.CompileSubroutineBody(subName)
+        self.CompileSubroutineBody()
         
         self.symbolTables.pop()
         self.ExitScope("subroutineDec")
 
-    def CompileSubroutineBody(self, subName):
+    def CompileSubroutineBody(self):
         self.EnterScope("subroutineBody")
 
         nVars=0
@@ -126,16 +131,22 @@ class CompilationEngine:
         while (self.IsKeyword([Keyword.VAR])):
             nVars+=self.CompileVarDec()
 
-        self.WriteCode("function {0}.{1} {2}".format(self.currentClassName, subName, str(nVars)))
+        self.WriteCode("function {0}.{1} {2}".format(self.currentClassName, self.currentSubName, str(nVars)))
 
         self.CompileStatements()
         self.ConsumeSymbol('}')
 
         self.ExitScope("subroutineBody")
 
-    def SetCurrentSymbolTableEntry(self, category):
-        self.currentSymbolTableEntry = SymbolTableEntry()
-        self.currentSymbolTableEntry.SetCategory(category)        
+    def ConsumeDeclaration(self, category):
+        entry = SymbolTableEntry()
+        entry.SetCategory(category)
+        entry.name = self.ConsumeIdentifier()
+        if category is "class":
+            self.currentClassName = entry.name
+        elif category in subroutine_types:
+            self.currentSubName = entry.name
+        self.GetTopSymbolTable().InsertEntry(entry)
 
     def CompileParameterList(self):
         """
@@ -147,15 +158,13 @@ class CompilationEngine:
 
         if (not self.IsSymbol([')'])):
             self.ConsumeType()
-            self.SetCurrentSymbolTableEntry("argument")            
-            self.ConsumeIdentifier()
+            self.ConsumeDeclaration("argument")
             nVars+=1
 
         while(self.IsSymbol([','])):
             self.ConsumeSymbol(',')
             self.ConsumeType()
-            self.SetCurrentSymbolTableEntry("argument")
-            self.ConsumeIdentifier()
+            self.ConsumeDeclaration("argument")
             nVars+=1
 
         self.ExitScope("parameterList")
@@ -170,13 +179,11 @@ class CompilationEngine:
         nVars = 0
         self.ConsumeKeyword([Keyword.VAR])
         self.ConsumeType()
-        self.SetCurrentSymbolTableEntry("var")
-        self.ConsumeIdentifier()  # varName
+        self.ConsumeDeclaration("var")
         nVars+=1
         while (self.IsSymbol([','])):
             self.ConsumeSymbol(',') 
-            self.SetCurrentSymbolTableEntry("var")
-            self.ConsumeIdentifier()  # varName
+            self.ConsumeDeclaration("var")
             nVars+=1
         
         self.ConsumeSymbol(';')
@@ -494,7 +501,7 @@ class CompilationEngine:
             self.tokenizer.advance()
         
         return actual
-    
+    '''
     def IsIdentifierBeingDefined(self):
         return self.currentSymbolTableEntry != None
 
@@ -523,14 +530,13 @@ class CompilationEngine:
             self.OutputTag("index", "no definition present")
 
         self.ExitScope("identifierDetails=========")
- 
+    '''
+
     def ConsumeIdentifier(self):
         self.VerifyTokenType(TokenType.IDENTIFIER)
         actual = self.tokenizer.identifier()
-        self.OutputTag("identifierName", self.tokenizer.identifier())
-        
-        self.OutputIdentifierDetails()
-
+        self.OutputTag("identifierName", self.tokenizer.identifier())        
+        #self.OutputIdentifierDetails()
         if self.tokenizer.hasMoreTokens():
             self.tokenizer.advance()
         
@@ -575,23 +581,24 @@ class CompilationEngine:
 
 
 def main(args):
-    if len(args) != 2:
-        print "Usage: (python) CompilationEngine.py <inputPath> <outputPath>"
+    if len(args) != 1:
+        print "Usage: (python) CompilationEngine.py <inputPath>"
         return
 
-    inputPath = args[0]
-    outputPath = args[1]
+    jack_file_path = args[0]
 
-    #inputPath = r"ArrayTest\Main.jack"; outputPath = r"ArrayTest\_Main.xml";
-    #inputPath = r"Square\Main.jack"; outputPath = r"Square\_Main.xml";
-    #inputPath = r"Square\Square.jack"; outputPath = r"Square\_Square.xml";
-    #inputPath = r"Square\SquareGame.jack"; outputPath = r"Square\_SquareGame.xml"
-    #inputPath = r"ExpressionlessSquare\Main.jack"; outputPath = r"ExpressionlessSquare\_Main.xml"
-    #inputPath = r"ExpressionlessSquare\Square.jack"; outputPath = r"ExpressionlessSquare\_Square.xml"
-    #inputPath = r"ExpressionlessSquare\SquareGame.jack"; outputPath = r"ExpressionlessSquare\_SquareGame.xml"
+    sources = []
 
-    engine = CompilationEngine(inputPath, outputPath)
-    engine.CompileClass()
+    if not jack_file_path.endswith(".jack"):
+        sources += [os.path.join(jack_file_path, source_file) for source_file
+                    in os.listdir(jack_file_path) if source_file.endswith('.jack')]
+    else:
+        sources = [jack_file_path]
+
+    engine = CompilationEngine()
+    for source_file in sources:
+        engine.SetClass(source_file, source_file.replace(".jack", ".vm"))
+        engine.CompileClass()
 
     #engine.WriteCode("call Main.main 0")
 

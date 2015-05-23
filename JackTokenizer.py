@@ -1,4 +1,5 @@
 import sys
+import os
 
 
 class TokenType:
@@ -22,7 +23,7 @@ class Tokenizer(object):
         """
         Opens the input file and get ready to tokenize it.
         """
-        self.file = open(filePath)
+        self.file = open(filePath)        
         self.current_token = None
         self.current_token_type = None
 
