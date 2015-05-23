@@ -1,5 +1,5 @@
 from JackTokenizer import TokenType, Tokenizer
-from SymbolTable import SymbolTable, CategoryUtils, SymbolTableEntry
+from SymbolTable import SymbolTable, CategoryUtils, SymbolTableEntry, Categories
 import sys
 import os
 
@@ -35,6 +35,7 @@ subroutine_types = [Keyword.CONSTRUCTOR, Keyword.FUNCTION, Keyword.METHOD]
 class CompilationEngine:
     def __init__(self):
         self.symbolTables = []
+        self.typeSizeMap = {"int" : 1, "bool" : 1, "char" : 1}
         self.uniqueLabelIndex = 0
     
     def SetClass(self, inputPath, outputPath):
@@ -64,8 +65,11 @@ class CompilationEngine:
 
         self.ConsumeSymbol('{')
 
+        totalSize = 1
         while (self.IsKeyword([Keyword.STATIC, Keyword.FIELD])):
-            self.CompileClassVarDec()
+            totalSize += self.CompileClassVarDec()
+
+        self.typeSizeMap[self.currentClassName] = totalSize
 
         # subroutineDec*
         while (self.IsKeyword(subroutine_types)):
@@ -82,19 +86,22 @@ class CompilationEngine:
         Compiles a static declaration or a field declaration.
         """
         self.EnterScope("classVarDec")
-
+        amount = 0
         category = self.tokenizer.keyword()
         self.ConsumeKeyword([Keyword.STATIC, Keyword.FIELD])        
-        self.ConsumeType()
+        varType = self.ConsumeType()
         self.ConsumeDeclaration(category)
-
+        amount+=1
         while (self.IsSymbol([','])):
             self.ConsumeSymbol(',')
             self.ConsumeDeclaration(category)
+            amount+=1
 
         self.ConsumeSymbol(';')
 
         self.ExitScope("classVarDec")
+        
+        return self.typeSizeMap[varType]*amount
 
     def CompileSubroutine(self):
         """
@@ -117,9 +124,8 @@ class CompilationEngine:
         self.CompileParameterList()
         self.ConsumeSymbol(')')
 
-        #self.CompileSubroutineBody(subName)
         self.CompileSubroutineBody()
-        
+
         self.symbolTables.pop()
         self.ExitScope("subroutineDec")
 
@@ -133,6 +139,11 @@ class CompilationEngine:
 
         self.WriteCode("function {0}.{1} {2}".format(self.currentClassName, self.currentSubName, str(nVars)))
 
+        if self.currentSubName == "new":
+            self.WriteCode("push constant {0}".format(self.typeSizeMap[self.currentClassName]))
+            self.WriteCode("call Memory.alloc 1")
+            self.WriteCode("pop pointer 0")
+
         self.CompileStatements()
         self.ConsumeSymbol('}')
 
@@ -142,7 +153,7 @@ class CompilationEngine:
         entry = SymbolTableEntry()
         entry.SetCategory(category)
         entry.name = self.ConsumeIdentifier()
-        if category is "class":
+        if category == "class":
             self.currentClassName = entry.name
         elif category in subroutine_types:
             self.currentSubName = entry.name
@@ -224,16 +235,30 @@ class CompilationEngine:
         """
         self.EnterScope("doStatement")
         self.ConsumeKeyword([Keyword.DO])
-        callee = self.ConsumeIdentifier()
+        prefix = self.ConsumeIdentifier()
+        calleeLocation = None
+        subName = None
         if self.IsSymbol(['.']):
             self.ConsumeSymbol('.')
-            callee = "{0}.{1}".format(callee ,self.ConsumeIdentifier())
+            entry = self.SymbolTableLookup(prefix)
+            if entry is not None and entry.category != Categories.CLASS:
+                calleeLocation = "{0} {1}".format(entry.segment, entry.index)
+            postfix = self.ConsumeIdentifier()
+            subName = "{0}.{1}".format(prefix ,postfix)
+        else:
+            subName = "{0}.{1}".format(self.currentClassName, prefix)
+            calleeLocation = "this 0"
+        
+        #This means we are calling an instance method, so we push it first
+        if calleeLocation != None:
+            self.WriteCode("push {0} //Pushing callee".format(calleeLocation))
+    
         self.ConsumeSymbol('(')
         nArgs = self.CompileExpressionList()
         self.ConsumeSymbol(')')
         self.ConsumeSymbol(';')
         
-        self.WriteCode("call {0} {1}".format(callee, nArgs))
+        self.WriteCode("call {0} {1}".format(subName, nArgs))
 
         self.ExitScope("doStatement")
 
@@ -303,6 +328,10 @@ class CompilationEngine:
         if not self.IsSymbol([';']):
             self.CompileExpression()
         self.ConsumeSymbol(';')
+
+        if self.currentSubName == "new":
+            self.WriteCode("push constant {0}".format(self.typeSizeMap[self.currentClassName]))
+            self.WriteCode("call Memory.alloc 1")
 
         self.WriteCode("return")
 
@@ -382,9 +411,11 @@ class CompilationEngine:
                 keyword = self.ConsumeKeyword(keyword_constants)
                 if keyword == "false":
                     self.WriteCode("push constant 0")
-                elif keyword == 'true':
+                elif keyword == "true":
                     self.WriteCode("push constant 0")
-                    self.WriteCode("not")                
+                    self.WriteCode("not")
+                elif keyword == "this":
+                    self.WriteCode("push this 0")
 
         elif self.IsSymbol(['(']):
             self.ConsumeSymbol('(')
@@ -407,7 +438,6 @@ class CompilationEngine:
                 self.CompileExpression()
                 self.ConsumeSymbol(']')
             elif self.IsSymbol(['(']):  # subroutineCall
-                self.WriteCode("call {0}".format(termName))
                 self.ConsumeSymbol('(')
                 self.WriteCode("call {0} {1}".format(termName, self.CompileExpressionList()))
                 self.ConsumeSymbol(')')
