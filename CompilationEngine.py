@@ -61,11 +61,11 @@ class CompilationEngine:
         self.symbolTables.append(SymbolTable())
 
         self.ConsumeKeyword([Keyword.CLASS])
-        self.ConsumeDeclaration("class")
+        self.ConsumeDeclaration("class", None)
 
         self.ConsumeSymbol('{')
 
-        totalSize = 1
+        totalSize = 0
         while (self.IsKeyword([Keyword.STATIC, Keyword.FIELD])):
             totalSize += self.CompileClassVarDec()
 
@@ -90,11 +90,11 @@ class CompilationEngine:
         category = self.tokenizer.keyword()
         self.ConsumeKeyword([Keyword.STATIC, Keyword.FIELD])        
         varType = self.ConsumeType()
-        self.ConsumeDeclaration(category)
+        self.ConsumeDeclaration(category, varType)
         amount+=1
         while (self.IsSymbol([','])):
             self.ConsumeSymbol(',')
-            self.ConsumeDeclaration(category)
+            self.ConsumeDeclaration(category, varType)
             amount+=1
 
         self.ConsumeSymbol(';')
@@ -110,15 +110,16 @@ class CompilationEngine:
         self.EnterScope("subroutineDec")
         self.symbolTables.append(SymbolTable())
 
-        category = self.tokenizer.keyword()
+        subType = self.tokenizer.keyword()
         self.ConsumeKeyword([Keyword.CONSTRUCTOR, Keyword.FUNCTION,
                              Keyword.METHOD])
         if (self.IsKeyword([Keyword.VOID])):
             self.ConsumeKeyword([Keyword.VOID])
         else:
             self.ConsumeType()
-
-        self.ConsumeDeclaration(category)
+        
+        #The first param is converted to internal rep. the second is preserved
+        self.ConsumeDeclaration(subType, subType)
 
         self.ConsumeSymbol('(')
         self.CompileParameterList()
@@ -138,10 +139,15 @@ class CompilationEngine:
             nVars+=self.CompileVarDec()
 
         self.WriteCode("function {0}.{1} {2}".format(self.currentClassName, self.currentSubName, str(nVars)))
+        
+        entry = self.SymbolTableLookup(self.currentSubName)
 
-        if self.currentSubName == "new":
+        if entry.type  == "constructor":
             self.WriteCode("push constant {0}".format(self.typeSizeMap[self.currentClassName]))
             self.WriteCode("call Memory.alloc 1")
+            self.WriteCode("pop pointer 0")
+        elif entry.type == "method":
+            self.WriteCode("push argument 0")
             self.WriteCode("pop pointer 0")
 
         self.CompileStatements()
@@ -149,14 +155,16 @@ class CompilationEngine:
 
         self.ExitScope("subroutineBody")
 
-    def ConsumeDeclaration(self, category):
+    def ConsumeDeclaration(self, category, type):
         entry = SymbolTableEntry()
         entry.SetCategory(category)
         entry.name = self.ConsumeIdentifier()
+        entry.type = type
         if category == "class":
             self.currentClassName = entry.name
         elif category in subroutine_types:
             self.currentSubName = entry.name
+
         self.GetTopSymbolTable().InsertEntry(entry)
 
     def CompileParameterList(self):
@@ -168,14 +176,14 @@ class CompilationEngine:
         nVars = 0
 
         if (not self.IsSymbol([')'])):
-            self.ConsumeType()
-            self.ConsumeDeclaration("argument")
+            varType = self.ConsumeType()
+            self.ConsumeDeclaration("argument", varType)
             nVars+=1
 
         while(self.IsSymbol([','])):
             self.ConsumeSymbol(',')
-            self.ConsumeType()
-            self.ConsumeDeclaration("argument")
+            varType = self.ConsumeType()
+            self.ConsumeDeclaration("argument", varType)
             nVars+=1
 
         self.ExitScope("parameterList")
@@ -189,12 +197,12 @@ class CompilationEngine:
         self.EnterScope("varDec")
         nVars = 0
         self.ConsumeKeyword([Keyword.VAR])
-        self.ConsumeType()
-        self.ConsumeDeclaration("var")
+        varType = self.ConsumeType()
+        self.ConsumeDeclaration("var", varType)
         nVars+=1
         while (self.IsSymbol([','])):
             self.ConsumeSymbol(',') 
-            self.ConsumeDeclaration("var")
+            self.ConsumeDeclaration("var", varType)
             nVars+=1
         
         self.ConsumeSymbol(';')
@@ -238,23 +246,27 @@ class CompilationEngine:
         prefix = self.ConsumeIdentifier()
         calleeLocation = None
         subName = None
+        
         if self.IsSymbol(['.']):
             self.ConsumeSymbol('.')
             entry = self.SymbolTableLookup(prefix)
             if entry is not None and entry.category != Categories.CLASS:
                 calleeLocation = "{0} {1}".format(entry.segment, entry.index)
+                prefix = entry.type
             postfix = self.ConsumeIdentifier()
             subName = "{0}.{1}".format(prefix ,postfix)
         else:
             subName = "{0}.{1}".format(self.currentClassName, prefix)
-            calleeLocation = "this 0"
+            calleeLocation = "pointer 0"
         
+        nArgs = 0
         #This means we are calling an instance method, so we push it first
         if calleeLocation != None:
             self.WriteCode("push {0} //Pushing callee".format(calleeLocation))
+            nArgs+=1
     
         self.ConsumeSymbol('(')
-        nArgs = self.CompileExpressionList()
+        nArgs += self.CompileExpressionList()
         self.ConsumeSymbol(')')
         self.ConsumeSymbol(';')
         
@@ -328,10 +340,6 @@ class CompilationEngine:
         if not self.IsSymbol([';']):
             self.CompileExpression()
         self.ConsumeSymbol(';')
-
-        if self.currentSubName == "new":
-            self.WriteCode("push constant {0}".format(self.typeSizeMap[self.currentClassName]))
-            self.WriteCode("call Memory.alloc 1")
 
         self.WriteCode("return")
 
@@ -415,7 +423,7 @@ class CompilationEngine:
                     self.WriteCode("push constant 0")
                     self.WriteCode("not")
                 elif keyword == "this":
-                    self.WriteCode("push this 0")
+                    self.WriteCode("push pointer 0")
 
         elif self.IsSymbol(['(']):
             self.ConsumeSymbol('(')

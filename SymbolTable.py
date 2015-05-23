@@ -9,7 +9,7 @@ class Categories:
     SUBROUTINE = 5,
     NONE = 6
 
-conversion = {"var" : Categories.VAR, "argument" : Categories.ARGUMENT ,"static" : Categories.STATIC, "field" : Categories.FIELD , "class" : Categories.CLASS, "function" : Categories.SUBROUTINE, "method" : Categories.SUBROUTINE}
+conversion = {"var" : Categories.VAR, "argument" : Categories.ARGUMENT ,"static" : Categories.STATIC, "field" : Categories.FIELD , "class" : Categories.CLASS, "function" : Categories.SUBROUTINE, "method" : Categories.SUBROUTINE, "constructor" : Categories.SUBROUTINE}
 
 conversion_mirror = {Categories.VAR : "var", Categories.ARGUMENT : "argument" , Categories.STATIC : "static", Categories.FIELD : "field", Categories.CLASS : "class",Categories.SUBROUTINE : "subroutine"}
 
@@ -49,6 +49,7 @@ class SymbolTableEntry(object):
         self.category = Categories.NONE
         self.index = -1
         self.segment = None
+        self.type = None
     
     def SetCategory(self, categoryStr):
         self.category = CategoryUtils.FromString(categoryStr)
