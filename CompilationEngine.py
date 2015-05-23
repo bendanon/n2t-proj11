@@ -53,6 +53,7 @@ class CompilationEngine:
         self.uniqueLabelIndex+=1
         return "pfl{0}".format(self.uniqueLabelIndex-1)
 
+    
     def CompileClass(self):
         """
         Compiles a complete class.
@@ -101,7 +102,7 @@ class CompilationEngine:
 
         self.ExitScope("classVarDec")
         
-        return self.typeSizeMap[varType]*amount
+        return amount
 
     def CompileSubroutine(self):
         """
@@ -230,7 +231,7 @@ class CompilationEngine:
                 self.CompileWhile()
 
             if self.IsKeyword([Keyword.DO]):
-                self.CompileDo()
+                self.CompileDo()                
 
             if self.IsKeyword([Keyword.RETURN]):
                 self.CompileReturn()
@@ -271,6 +272,9 @@ class CompilationEngine:
         self.ConsumeSymbol(';')
         
         self.WriteCode("call {0} {1}".format(subName, nArgs))
+        
+        #Get rid of the return value (garbage)
+        self.WriteCode("pop temp 0")
 
         self.ExitScope("doStatement")
 
@@ -282,18 +286,28 @@ class CompilationEngine:
 
         self.ConsumeKeyword([Keyword.LET])
         varName = self.ConsumeIdentifier()
+        entry = self.SymbolTableLookup(varName)
+        isArray = False
         if self.IsSymbol(['[']):
+            isArray = True
             self.ConsumeSymbol('[')
             self.CompileExpression()
+            self.WriteCode("push {0} {1}".format(entry.segment, entry.index)) #array base
+            self.WriteCode("add") #Add offset
             self.ConsumeSymbol(']')
         self.ConsumeSymbol('=')
         self.CompileExpression()
         self.ConsumeSymbol(';')
+
+        if isArray:
+            self.WriteCode("pop temp 0")    #Save the expression result
+            self.WriteCode("pop pointer 1") #Align THAT
+            self.WriteCode("push temp 0")   #Push the exp result
+            self.WriteCode("pop that 0")    #Put the exp result in the array position
+        else:
+            self.WriteCode("pop {0} {1}".format(entry.segment, entry.index))
     
         self.ExitScope("letStatement")
-        
-        entry = self.SymbolTableLookup(varName)
-        self.WriteCode("pop {0} {1}".format(entry.segment, entry.index))
 
     def CompileWhile(self):
         """
@@ -444,6 +458,9 @@ class CompilationEngine:
             if self.IsSymbol(['[']):    # varName '[' expression ']'
                 self.ConsumeSymbol('[')
                 self.CompileExpression()
+                self.WriteCode("add")
+                self.WriteCode("pop pointer 1")
+                self.WriteCode("push that 0")
                 self.ConsumeSymbol(']')
             elif self.IsSymbol(['(']):  # subroutineCall
                 self.ConsumeSymbol('(')
@@ -534,6 +551,11 @@ class CompilationEngine:
     def ConsumeStringConstant(self):
         self.VerifyTokenType(TokenType.STRING_CONST)
         actual = self.tokenizer.stringVal()
+        self.WriteCode("push constant {0}".format(len(actual)))
+        self.WriteCode("call String.new 1")
+        for c in actual:
+            self.WriteCode("push constant {0}".format(ord(c)))
+            self.WriteCode("call String.appendChar 2")            
         self.OutputTag("stringConstant", self.tokenizer.stringVal())
         if self.tokenizer.hasMoreTokens():
             self.tokenizer.advance()
