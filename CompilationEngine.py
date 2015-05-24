@@ -122,6 +122,9 @@ class CompilationEngine:
         
         #The first param is converted to internal rep. the second is preserved
         self.ConsumeDeclaration(subType, subType)
+        
+        if subType == "method":
+            self.localSymbolTable.indexList[Categories.ARGUMENT[0]]+=1
 
         self.ConsumeSymbol('(')
         self.CompileParameterList()
@@ -360,6 +363,8 @@ class CompilationEngine:
         self.ConsumeKeyword([Keyword.RETURN])
         if not self.IsSymbol([';']):
             self.CompileExpression()
+        else:
+            self.WriteCode("push constant 0")
         self.ConsumeSymbol(';')
 
         self.WriteCode("return")
@@ -374,8 +379,9 @@ class CompilationEngine:
         self.EnterScope("ifStatement")
 
         self.ConsumeKeyword([Keyword.IF])
-        L1 = self.GenerateUniqueLabel()
-        L2 = self.GenerateUniqueLabel()
+        IF_TRUE = self.GenerateUniqueLabel()
+        IF_FALSE = self.GenerateUniqueLabel()
+        IF_END = self.GenerateUniqueLabel()
         
         #The if statement condition
         self.ConsumeSymbol('(')
@@ -383,26 +389,23 @@ class CompilationEngine:
         self.ConsumeSymbol(')')
         
         #Jump to L1 if condition doesn't hold
-        self.WriteCode("not")
-        self.WriteCode("if-goto {0}".format(L1))
+        self.WriteCode("if-goto {0}".format(IF_TRUE))
+        self.WriteCode("goto {0}".format(IF_FALSE))
+        self.WriteCode("label {0}".format(IF_TRUE))
 
         self.ConsumeSymbol('{')
         self.CompileStatements()
         self.ConsumeSymbol('}')
-        
-        #Done
-        self.WriteCode("goto {0}".format(L2))
-        
-        self.WriteCode("label {0}".format(L1))
+
+        self.WriteCode("goto {0}".format(IF_END))
+        self.WriteCode("label {0}".format(IF_FALSE))
         if self.IsKeyword([Keyword.ELSE]):
             self.ConsumeKeyword([Keyword.ELSE])
             self.ConsumeSymbol('{')
             self.CompileStatements()
-            self.ConsumeSymbol('}')
-        
-        self.WriteCode("label {0}".format(L2))
-            
+            self.ConsumeSymbol('}')        
 
+        self.WriteCode("label {0}".format(IF_END))
         self.ExitScope("ifStatement")
 
     def CompileExpression(self):
@@ -477,12 +480,13 @@ class CompilationEngine:
                 self.ConsumeSymbol('.')
                 funcName = self.ConsumeIdentifier()                                
                 entry = self.GetSubroutineEntry(termName, funcName)
-
+                extraParam = 0
                 if entry != None and entry.type == "method":
                     termName = self.SymbolTableLookup(termName).type
+                    extraParam = 1
 
                 self.ConsumeSymbol('(')
-                self.WriteCode("call {0}.{1} {2}".format(termName, funcName, self.CompileExpressionList()))
+                self.WriteCode("call {0}.{1} {2}".format(termName, funcName, self.CompileExpressionList() + extraParam))
                 self.ConsumeSymbol(')')
 
         self.ExitScope("term")
