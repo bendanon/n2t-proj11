@@ -462,14 +462,14 @@ class CompilationEngine:
             self.WriteCode(unary_symbols[symbol])
         else:
             termName = self.ConsumeIdentifier()
-            
+            entry = self.SymbolTableLookup(termName)
+            if entry != None:
+                if CategoryUtils.IsIndexed(entry.category):
+                    self.WriteCode("push {0} {1} //{2}".format(CategoryUtils.GetSegment(entry.category), entry.index, termName))
+
             if self.IsSymbol(['[']):    # varName '[' expression ']'
                 self.ConsumeSymbol('[')
                 self.CompileExpression()
-                entry = self.SymbolTableLookup(termName)
-                if entry != None:
-                    if CategoryUtils.IsIndexed(entry.category):
-                        self.WriteCode("push {0} {1} //{2}".format(CategoryUtils.GetSegment(entry.category), entry.index, termName))
                 self.WriteCode("add")
                 self.WriteCode("pop pointer 1")
                 self.WriteCode("push that 0")
@@ -490,11 +490,6 @@ class CompilationEngine:
                 self.ConsumeSymbol('(')
                 self.WriteCode("call {0}.{1} {2}".format(termName, funcName, self.CompileExpressionList() + extraParam))
                 self.ConsumeSymbol(')')
-            else:
-                entry = self.SymbolTableLookup(termName)
-                if entry != None:
-                    if CategoryUtils.IsIndexed(entry.category):
-                        self.WriteCode("push {0} {1} //{2}".format(CategoryUtils.GetSegment(entry.category), entry.index, termName))
 
         self.ExitScope("term")
         
