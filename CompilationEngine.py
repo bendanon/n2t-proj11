@@ -34,7 +34,8 @@ subroutine_types = [Keyword.CONSTRUCTOR, Keyword.FUNCTION, Keyword.METHOD]
 
 class CompilationEngine:
     def __init__(self):
-        self.symbolTables = []
+        self.localSymbolTable = None
+        self.classToSymbolTable = {}
         self.typeSizeMap = {"int" : 1, "bool" : 1, "char" : 1}
         self.uniqueLabelIndex = 0
     
@@ -45,7 +46,6 @@ class CompilationEngine:
         self.tokenizer.advance()
         self.indentLevel = 0
         
-        self.currentSymbolTableEntry = None
         self.currentClassName = None
         self.currentSubName = None
 
@@ -59,11 +59,12 @@ class CompilationEngine:
         Compiles a complete class.
         """
         self.EnterScope("class")
-        self.symbolTables.append(SymbolTable())
-
+        
         self.ConsumeKeyword([Keyword.CLASS])
         self.ConsumeDeclaration("class", None)
-
+        
+        self.classToSymbolTable[self.currentClassName] = SymbolTable()
+        
         self.ConsumeSymbol('{')
 
         totalSize = 0
@@ -78,7 +79,7 @@ class CompilationEngine:
 
         self.ConsumeSymbol('}')
 
-        self.symbolTables.pop()
+        #self.symbolTables.pop()
         self.ExitScope("class")
         self.outputFile.close()
 
@@ -109,7 +110,7 @@ class CompilationEngine:
         Compiles a complete method, function, or constructor.
         """
         self.EnterScope("subroutineDec")
-        self.symbolTables.append(SymbolTable())
+        self.localSymbolTable = SymbolTable()
 
         subType = self.tokenizer.keyword()
         self.ConsumeKeyword([Keyword.CONSTRUCTOR, Keyword.FUNCTION,
@@ -128,7 +129,6 @@ class CompilationEngine:
 
         self.CompileSubroutineBody()
 
-        self.symbolTables.pop()
         self.ExitScope("subroutineDec")
 
     def CompileSubroutineBody(self):
@@ -161,12 +161,19 @@ class CompilationEngine:
         entry.SetCategory(category)
         entry.name = self.ConsumeIdentifier()
         entry.type = type
-        if category == "class":
+        
+        local_categories = [Categories.VAR, Categories.ARGUMENT]        
+        class_categories = [Categories.SUBROUTINE, Categories.FIELD, Categories.STATIC]
+
+        if entry.category == Categories.CLASS:
             self.currentClassName = entry.name
-        elif category in subroutine_types:
+        elif entry.category == Categories.SUBROUTINE:
             self.currentSubName = entry.name
 
-        self.GetTopSymbolTable().InsertEntry(entry)
+        if entry.category in local_categories:
+            self.localSymbolTable.InsertEntry(entry)
+        elif entry.category in class_categories:
+            self.classToSymbolTable[self.currentClassName].InsertEntry(entry)
 
     def CompileParameterList(self):
         """
@@ -468,7 +475,12 @@ class CompilationEngine:
                 self.ConsumeSymbol(')')
             elif self.IsSymbol(['.']):
                 self.ConsumeSymbol('.')
-                funcName = self.ConsumeIdentifier()
+                funcName = self.ConsumeIdentifier()                                
+                entry = self.GetSubroutineEntry(termName, funcName)
+
+                if entry != None and entry.type == "method":
+                    termName = self.SymbolTableLookup(termName).type
+
                 self.ConsumeSymbol('(')
                 self.WriteCode("call {0}.{1} {2}".format(termName, funcName, self.CompileExpressionList()))
                 self.ConsumeSymbol(')')
@@ -476,6 +488,17 @@ class CompilationEngine:
         self.ExitScope("term")
         
         return termName
+
+    def GetSubroutineEntry(self, prefix, postfix):
+        entry = self.SymbolTableLookup(postfix)
+        if entry != None:
+            return entry
+
+        varEntry = self.SymbolTableLookup(prefix)
+        if varEntry != None:
+            return self.ClassSymbolTableLookup(postfix, varEntry.type)
+
+        return None
 
     def CompileExpressionList(self):
         """
@@ -561,42 +584,11 @@ class CompilationEngine:
             self.tokenizer.advance()
         
         return actual
-    '''
-    def IsIdentifierBeingDefined(self):
-        return self.currentSymbolTableEntry != None
-
-    def FinishIdentifierDefinition(self):   
-        self.currentSymbolTableEntry.SetName(self.tokenizer.identifier())
-        self.GetTopSymbolTable().InsertEntry(self.currentSymbolTableEntry)
-        self.currentSymbolTableEntry = None        
-    
-    def OutputIdentifierDetails(self):
-
-        self.EnterScope("identifierDetails=========")
-
-        self.OutputTag("beingDefined", str(self.IsIdentifierBeingDefined()))
-
-        if self.IsIdentifierBeingDefined():
-            self.FinishIdentifierDefinition()
-
-        entry = self.SymbolTableLookup(self.tokenizer.identifier())
-
-        if entry != None:
-            if CategoryUtils.IsIndexed(entry.category):
-                self.OutputTag("index", self.GetTopSymbolTable().SymbolIndex(entry.name))
-            self.OutputTag("identifierCategory", CategoryUtils.ToString(entry.category))
-        else:
-            self.OutputTag("identifierCategory", "no definition present")
-            self.OutputTag("index", "no definition present")
-
-        self.ExitScope("identifierDetails=========")
-    '''
 
     def ConsumeIdentifier(self):
         self.VerifyTokenType(TokenType.IDENTIFIER)
         actual = self.tokenizer.identifier()
         self.OutputTag("identifierName", self.tokenizer.identifier())        
-        #self.OutputIdentifierDetails()
         if self.tokenizer.hasMoreTokens():
             self.tokenizer.advance()
         
@@ -622,12 +614,15 @@ class CompilationEngine:
         else:
             return None
 
+    def ClassSymbolTableLookup(self, name, containingClass):   
+        return self.classToSymbolTable[containingClass].GetEntry(name)
+
     def SymbolTableLookup(self, name):
-        for st in reversed(self.symbolTables):
-            entry = st.GetEntry(name)
-            if entry != None:
-                return entry
-        return None
+        entry = self.localSymbolTable.GetEntry(name)
+        if entry != None:
+            return entry
+        else:
+            return self.ClassSymbolTableLookup(name, self.currentClassName)
 
     def WriteCode(self, line):
         self.codeFile.write(line + '\n')
@@ -656,7 +651,7 @@ def main(args):
         sources = [jack_file_path]
 
     engine = CompilationEngine()
-    for source_file in sources:
+    for source_file in reversed(sources):
         engine.SetClass(source_file, source_file.replace(".jack", ".vm"))
         engine.CompileClass()
 
