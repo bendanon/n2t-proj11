@@ -208,7 +208,6 @@ class Tokenizer(object):
     def replaceUnsafeXmlSafeChars(self, s):
         return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
-
 def main(args):
     if len(args) != 1:
         print "Usage: (python) JackTokenizer.py <inputPath>"
