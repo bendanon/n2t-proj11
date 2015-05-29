@@ -679,7 +679,7 @@ def main(args):
         sources = [jack_file_path]
 
     engine = CompilationEngine()
-    for source_file in reversed(sources):
+    for source_file in sources:
         engine.SetClass(source_file, source_file.replace(".jack", ".vm"))
         engine.CompileClass()
 
