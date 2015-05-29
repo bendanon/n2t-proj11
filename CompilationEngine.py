@@ -1,7 +1,9 @@
 from JackTokenizer import TokenType, Tokenizer
-from SymbolTable import SymbolTable, CategoryUtils, SymbolTableEntry, Categories
+from SymbolTable import (SymbolTable, CategoryUtils, SymbolTableEntry,
+                         Categories)
 import sys
 import os
+
 
 class Keyword:
     CLASS = 'class'
@@ -27,51 +29,57 @@ class Keyword:
     THIS = 'this'
 
 
-op_symbols = {'+' : 'add', '-' : 'sub', '*' : 'call Math.multiply 2', '/' : 'call Math.divide 2', '&amp;' : 'and' , '|' : 'or', "&lt;" : 'lt' , "&gt;" : 'gt', '=' : 'eq'}
-unary_symbols = {'-' : 'neg', '~' : 'not'}
+op_symbols = {'+': 'add',
+              '-': 'sub',
+              '*': 'call Math.multiply 2',
+              '/': 'call Math.divide 2',
+              '&amp;': 'and',
+              '|': 'or',
+              "&lt;": 'lt',
+              "&gt;": 'gt',
+              '=': 'eq'}
+
+unary_symbols = {'-': 'neg',
+                 '~': 'not'}
 
 subroutine_types = [Keyword.CONSTRUCTOR, Keyword.FUNCTION, Keyword.METHOD]
 
+
 class CompilationEngine:
     def __init__(self):
-        self.localSymbolTable = None
-        self.classToSymbolTable = {}
-        self.typeSizeMap = {"int" : 1, "bool" : 1, "char" : 1}
-        self.uniqueLabelIndex = 0
-    
-    def SetClass(self, inputPath, outputPath):
-        self.tokenizer = Tokenizer(inputPath)
-        self.outputFile = open("{0}.xml".format(outputPath), 'w')
-        self.codeFile = open(outputPath, 'w')
+        self.local_symbol_table = None
+        self.class_symbol_tables = {}
+        self.type_size_map = {"int": 1, "bool": 1, "char": 1}
+        self.unique_label_index = 0
+
+    def SetClass(self, input_path, output_path):
+        self.tokenizer = Tokenizer(input_path)
+        self.output_file = open("{0}.xml".format(output_path), 'w')
+        self.code_file = open(output_path, 'w')
         self.tokenizer.advance()
-        self.indentLevel = 0
-        
-        self.currentClassName = None
-        self.currentSubName = None
+        self.indent_level = 0
 
-    def GenerateUniqueLabel(self):
-        self.uniqueLabelIndex+=1
-        return "pfl{0}".format(self.uniqueLabelIndex-1)
+        self.current_class_name = None
+        self.current_sub_name = None
 
-    
     def CompileClass(self):
         """
         Compiles a complete class.
         """
         self.EnterScope("class")
-        
+
         self.ConsumeKeyword([Keyword.CLASS])
         self.ConsumeDeclaration("class", None)
-        
-        self.classToSymbolTable[self.currentClassName] = SymbolTable()
-        
+
+        self.class_symbol_tables[self.current_class_name] = SymbolTable()
+
         self.ConsumeSymbol('{')
 
         totalSize = 0
         while (self.IsKeyword([Keyword.STATIC, Keyword.FIELD])):
             totalSize += self.CompileClassVarDec()
 
-        self.typeSizeMap[self.currentClassName] = totalSize
+        self.type_size_map[self.current_class_name] = totalSize
 
         # subroutineDec*
         while (self.IsKeyword(subroutine_types)):
@@ -79,9 +87,8 @@ class CompilationEngine:
 
         self.ConsumeSymbol('}')
 
-        #self.symbolTables.pop()
         self.ExitScope("class")
-        self.outputFile.close()
+        self.output_file.close()
 
     def CompileClassVarDec(self):
         """
@@ -90,19 +97,19 @@ class CompilationEngine:
         self.EnterScope("classVarDec")
         amount = 0
         category = self.tokenizer.keyword()
-        self.ConsumeKeyword([Keyword.STATIC, Keyword.FIELD])        
+        self.ConsumeKeyword([Keyword.STATIC, Keyword.FIELD])
         varType = self.ConsumeType()
         self.ConsumeDeclaration(category, varType)
-        amount+=1
+        amount += 1
         while (self.IsSymbol([','])):
             self.ConsumeSymbol(',')
             self.ConsumeDeclaration(category, varType)
-            amount+=1
+            amount += 1
 
         self.ConsumeSymbol(';')
 
         self.ExitScope("classVarDec")
-        
+
         return amount
 
     def CompileSubroutine(self):
@@ -110,7 +117,7 @@ class CompilationEngine:
         Compiles a complete method, function, or constructor.
         """
         self.EnterScope("subroutineDec")
-        self.localSymbolTable = SymbolTable()
+        self.local_symbol_table = SymbolTable()
 
         subType = self.tokenizer.keyword()
         self.ConsumeKeyword([Keyword.CONSTRUCTOR, Keyword.FUNCTION,
@@ -119,12 +126,12 @@ class CompilationEngine:
             self.ConsumeKeyword([Keyword.VOID])
         else:
             self.ConsumeType()
-        
-        #The first param is converted to internal rep. the second is preserved
+
+        # The first param is converted to internal rep. the second is preserved
         self.ConsumeDeclaration(subType, subType)
-        
+
         if subType == "method":
-            self.localSymbolTable.indexList[Categories.ARGUMENT[0]]+=1
+            self.local_symbol_table.indexList[Categories.ARGUMENT[0]] += 1
 
         self.ConsumeSymbol('(')
         self.CompileParameterList()
@@ -137,17 +144,20 @@ class CompilationEngine:
     def CompileSubroutineBody(self):
         self.EnterScope("subroutineBody")
 
-        nVars=0
+        nVars = 0
         self.ConsumeSymbol('{')
         while (self.IsKeyword([Keyword.VAR])):
-            nVars+=self.CompileVarDec()
+            nVars += self.CompileVarDec()
 
-        self.WriteCode("function {0}.{1} {2}".format(self.currentClassName, self.currentSubName, str(nVars)))
-        
-        entry = self.SymbolTableLookup(self.currentSubName)
+        self.WriteCode("function {0}.{1} {2}".format(self.current_class_name,
+                                                     self.current_sub_name,
+                                                     str(nVars)))
 
-        if entry.type  == "constructor":
-            self.WriteCode("push constant {0}".format(self.typeSizeMap[self.currentClassName]))
+        entry = self.SymbolTableLookup(self.current_sub_name)
+
+        if entry.type == "constructor":
+            self.WriteCode("push constant {0}".
+                           format(self.type_size_map[self.current_class_name]))
             self.WriteCode("call Memory.alloc 1")
             self.WriteCode("pop pointer 0")
         elif entry.type == "method":
@@ -159,24 +169,28 @@ class CompilationEngine:
 
         self.ExitScope("subroutineBody")
 
-    def ConsumeDeclaration(self, category, type):
+    def ConsumeDeclaration(self, category, entry_type):
         entry = SymbolTableEntry()
         entry.SetCategory(category)
         entry.name = self.ConsumeIdentifier()
-        entry.type = type
-        
-        local_categories = [Categories.VAR, Categories.ARGUMENT]        
-        class_categories = [Categories.SUBROUTINE, Categories.FIELD, Categories.STATIC]
+        entry.type = entry_type
 
+        local_categories = [Categories.VAR, Categories.ARGUMENT]
+        class_categories = [Categories.SUBROUTINE, Categories.FIELD,
+                            Categories.STATIC]
+
+        # Updating current class / subroutine names
         if entry.category == Categories.CLASS:
-            self.currentClassName = entry.name
+            self.current_class_name = entry.name
         elif entry.category == Categories.SUBROUTINE:
-            self.currentSubName = entry.name
+            self.current_sub_name = entry.name
 
+        # Updating local / class symbol tables
         if entry.category in local_categories:
-            self.localSymbolTable.InsertEntry(entry)
+            self.local_symbol_table.InsertEntry(entry)
         elif entry.category in class_categories:
-            self.classToSymbolTable[self.currentClassName].InsertEntry(entry)
+            self.class_symbol_tables[self.current_class_name].\
+                InsertEntry(entry)
 
     def CompileParameterList(self):
         """
@@ -189,13 +203,13 @@ class CompilationEngine:
         if (not self.IsSymbol([')'])):
             varType = self.ConsumeType()
             self.ConsumeDeclaration("argument", varType)
-            nVars+=1
+            nVars += 1
 
         while(self.IsSymbol([','])):
             self.ConsumeSymbol(',')
             varType = self.ConsumeType()
             self.ConsumeDeclaration("argument", varType)
-            nVars+=1
+            nVars += 1
 
         self.ExitScope("parameterList")
 
@@ -210,12 +224,12 @@ class CompilationEngine:
         self.ConsumeKeyword([Keyword.VAR])
         varType = self.ConsumeType()
         self.ConsumeDeclaration("var", varType)
-        nVars+=1
+        nVars += 1
         while (self.IsSymbol([','])):
-            self.ConsumeSymbol(',') 
+            self.ConsumeSymbol(',')
             self.ConsumeDeclaration("var", varType)
-            nVars+=1
-        
+            nVars += 1
+
         self.ConsumeSymbol(';')
 
         self.ExitScope("varDec")
@@ -241,7 +255,7 @@ class CompilationEngine:
                 self.CompileWhile()
 
             if self.IsKeyword([Keyword.DO]):
-                self.CompileDo()                
+                self.CompileDo()
 
             if self.IsKeyword([Keyword.RETURN]):
                 self.CompileReturn()
@@ -257,7 +271,7 @@ class CompilationEngine:
         prefix = self.ConsumeIdentifier()
         calleeLocation = None
         subName = None
-        
+
         if self.IsSymbol(['.']):
             self.ConsumeSymbol('.')
             entry = self.SymbolTableLookup(prefix)
@@ -265,25 +279,25 @@ class CompilationEngine:
                 calleeLocation = "{0} {1}".format(entry.segment, entry.index)
                 prefix = entry.type
             postfix = self.ConsumeIdentifier()
-            subName = "{0}.{1}".format(prefix ,postfix)
+            subName = "{0}.{1}".format(prefix, postfix)
         else:
-            subName = "{0}.{1}".format(self.currentClassName, prefix)
+            subName = "{0}.{1}".format(self.current_class_name, prefix)
             calleeLocation = "pointer 0"
-        
+
         nArgs = 0
-        #This means we are calling an instance method, so we push it first
-        if calleeLocation != None:
+        # This means we are calling an instance method, so we push it first
+        if calleeLocation is not None:
             self.WriteCode("push {0} //Pushing callee".format(calleeLocation))
-            nArgs+=1
-    
+            nArgs += 1
+
         self.ConsumeSymbol('(')
         nArgs += self.CompileExpressionList()
         self.ConsumeSymbol(')')
         self.ConsumeSymbol(';')
-        
+
         self.WriteCode("call {0} {1}".format(subName, nArgs))
-        
-        #Get rid of the return value (garbage)
+
+        # Get rid of the return value (garbage)
         self.WriteCode("pop temp 0")
 
         self.ExitScope("doStatement")
@@ -302,21 +316,23 @@ class CompilationEngine:
             isArray = True
             self.ConsumeSymbol('[')
             self.CompileExpression()
-            self.WriteCode("push {0} {1}".format(entry.segment, entry.index)) #array base
-            self.WriteCode("add") #Add offset
+            self.WriteCode("push {0} {1}".
+                           format(entry.segment, entry.index))  # array base
+            self.WriteCode("add")  # Add offset
             self.ConsumeSymbol(']')
         self.ConsumeSymbol('=')
         self.CompileExpression()
         self.ConsumeSymbol(';')
 
         if isArray:
-            self.WriteCode("pop temp 0")    #Save the expression result
-            self.WriteCode("pop pointer 1") #Align THAT
-            self.WriteCode("push temp 0")   #Push the exp result
-            self.WriteCode("pop that 0")    #Put the exp result in the array position
+            self.WriteCode("pop temp 0")  # Save the expression result
+            self.WriteCode("pop pointer 1")  # Align THAT
+            self.WriteCode("push temp 0")  # Push the exp result
+            # Put the exp result in the array position
+            self.WriteCode("pop that 0")
         else:
             self.WriteCode("pop {0} {1}".format(entry.segment, entry.index))
-    
+
         self.ExitScope("letStatement")
 
     def CompileWhile(self):
@@ -328,28 +344,28 @@ class CompilationEngine:
         self.ConsumeKeyword([Keyword.WHILE])
         L1 = self.GenerateUniqueLabel()
         L2 = self.GenerateUniqueLabel()
-        
-        #While entry point
+
+        # While entry point
         self.WriteCode("label {0}".format(L1))
 
-        #while loop condition
+        # while loop condition
         self.ConsumeSymbol('(')
         self.CompileExpression()
         self.ConsumeSymbol(')')
-        
-        #Jump to L2 if condition doesn't hold
+
+        # Jump to L2 if condition doesn't hold
         self.WriteCode("not")
         self.WriteCode("if-goto {0}".format(L2))
 
-        #While loop logic
+        # While loop logic
         self.ConsumeSymbol('{')
         self.CompileStatements()
         self.ConsumeSymbol('}')
-        
-        #Go back to L1 for another iteration
+
+        # Go back to L1 for another iteration
         self.WriteCode("goto {0}".format(L1))
 
-        #While termination point
+        # While termination point
         self.WriteCode("label {0}".format(L2))
 
         self.ExitScope("whileStatement")
@@ -382,13 +398,13 @@ class CompilationEngine:
         IF_TRUE = self.GenerateUniqueLabel()
         IF_FALSE = self.GenerateUniqueLabel()
         IF_END = self.GenerateUniqueLabel()
-        
-        #The if statement condition
+
+        # The if statement condition
         self.ConsumeSymbol('(')
         self.CompileExpression()
         self.ConsumeSymbol(')')
-        
-        #Jump to L1 if condition doesn't hold
+
+        # Jump to L1 if condition doesn't hold
         self.WriteCode("if-goto {0}".format(IF_TRUE))
         self.WriteCode("goto {0}".format(IF_FALSE))
         self.WriteCode("label {0}".format(IF_TRUE))
@@ -403,7 +419,7 @@ class CompilationEngine:
             self.ConsumeKeyword([Keyword.ELSE])
             self.ConsumeSymbol('{')
             self.CompileStatements()
-            self.ConsumeSymbol('}')        
+            self.ConsumeSymbol('}')
 
         self.WriteCode("label {0}".format(IF_END))
         self.ExitScope("ifStatement")
@@ -421,8 +437,7 @@ class CompilationEngine:
             self.WriteCode(op_symbols[op])
 
         self.ExitScope("expression")
-    
-        
+
     def CompileTerm(self):
         """
         Compiles a term.
@@ -432,9 +447,10 @@ class CompilationEngine:
         keyword_constants = [Keyword.TRUE, Keyword.FALSE, Keyword.NULL,
                              Keyword.THIS]
         termName = None
-                
+
         if self.IsType(TokenType.INT_CONST):
-            self.WriteCode("push constant {0}".format(self.ConsumeIntegerConstant()))
+            self.WriteCode("push constant {0}".
+                           format(self.ConsumeIntegerConstant()))
 
         elif self.IsType(TokenType.STRING_CONST):
             self.ConsumeStringConstant()
@@ -463,11 +479,14 @@ class CompilationEngine:
         else:
             termName = self.ConsumeIdentifier()
             entry = self.SymbolTableLookup(termName)
-            if entry != None:
+            if entry is not None:
                 if CategoryUtils.IsIndexed(entry.category):
-                    self.WriteCode("push {0} {1} //{2}".format(CategoryUtils.GetSegment(entry.category), entry.index, termName))
+                    self.WriteCode("push {0} {1} //{2}".
+                                   format(CategoryUtils.
+                                          GetSegment(entry.category),
+                                          entry.index, termName))
 
-            if self.IsSymbol(['[']):    # varName '[' expression ']'
+            if self.IsSymbol(['[']):  # varName '[' expression ']'
                 self.ConsumeSymbol('[')
                 self.CompileExpression()
                 self.WriteCode("add")
@@ -476,32 +495,36 @@ class CompilationEngine:
                 self.ConsumeSymbol(']')
             elif self.IsSymbol(['(']):  # subroutineCall
                 self.ConsumeSymbol('(')
-                self.WriteCode("call {0} {1}".format(termName, self.CompileExpressionList()))
+                self.WriteCode("call {0} {1}".
+                               format(termName, self.CompileExpressionList()))
                 self.ConsumeSymbol(')')
             elif self.IsSymbol(['.']):
                 self.ConsumeSymbol('.')
-                funcName = self.ConsumeIdentifier()                                
+                funcName = self.ConsumeIdentifier()
                 entry = self.GetSubroutineEntry(termName, funcName)
                 extraParam = 0
-                if entry != None and entry.type == "method":
+                if entry is not None and entry.type == "method":
                     termName = self.SymbolTableLookup(termName).type
                     extraParam = 1
 
                 self.ConsumeSymbol('(')
-                self.WriteCode("call {0}.{1} {2}".format(termName, funcName, self.CompileExpressionList() + extraParam))
+                self.WriteCode("call {0}.{1} {2}".
+                               format(termName, funcName,
+                                      self.CompileExpressionList() +
+                                      extraParam))
                 self.ConsumeSymbol(')')
 
         self.ExitScope("term")
-        
+
         return termName
 
     def GetSubroutineEntry(self, prefix, postfix):
         entry = self.SymbolTableLookup(postfix)
-        if entry != None:
+        if entry is not None:
             return entry
 
         varEntry = self.SymbolTableLookup(prefix)
-        if varEntry != None:
+        if varEntry is not None:
             return self.ClassSymbolTableLookup(postfix, varEntry.type)
 
         return None
@@ -515,15 +538,15 @@ class CompilationEngine:
         nArgs = 0
         if not self.IsSymbol(')'):
             self.CompileExpression()
-            nArgs+=1
+            nArgs += 1
 
         while self.IsSymbol([',']):
             self.ConsumeSymbol(',')
             self.CompileExpression()
-            nArgs+=1
+            nArgs += 1
 
         self.ExitScope("expressionList")
-    
+
         return nArgs
 
     def IsKeyword(self, keyword_list):
@@ -541,7 +564,8 @@ class CompilationEngine:
         if (self.tokenizer.tokenType() == TokenType.IDENTIFIER):
             return self.ConsumeIdentifier()
         else:
-            return self.ConsumeKeyword([Keyword.INT, Keyword.CHAR, Keyword.BOOLEAN])
+            return self.ConsumeKeyword([Keyword.INT, Keyword.CHAR,
+                                        Keyword.BOOLEAN])
 
     def ConsumeKeyword(self, keywordList):
         self.VerifyTokenType(TokenType.KEYWORD)
@@ -565,7 +589,7 @@ class CompilationEngine:
         self.OutputTag("symbol", actual)
         if self.tokenizer.hasMoreTokens():
             self.tokenizer.advance()
-        
+
         return actual
 
     def ConsumeIntegerConstant(self):
@@ -574,7 +598,7 @@ class CompilationEngine:
         self.OutputTag("integerConstant", self.tokenizer.intVal())
         if self.tokenizer.hasMoreTokens():
             self.tokenizer.advance()
-        
+
         return actual
 
     def ConsumeStringConstant(self):
@@ -584,20 +608,20 @@ class CompilationEngine:
         self.WriteCode("call String.new 1")
         for c in actual:
             self.WriteCode("push constant {0}".format(ord(c)))
-            self.WriteCode("call String.appendChar 2")            
+            self.WriteCode("call String.appendChar 2")
         self.OutputTag("stringConstant", self.tokenizer.stringVal())
         if self.tokenizer.hasMoreTokens():
             self.tokenizer.advance()
-        
+
         return actual
 
     def ConsumeIdentifier(self):
         self.VerifyTokenType(TokenType.IDENTIFIER)
         actual = self.tokenizer.identifier()
-        self.OutputTag("identifierName", self.tokenizer.identifier())        
+        self.OutputTag("identifierName", self.tokenizer.identifier())
         if self.tokenizer.hasMoreTokens():
             self.tokenizer.advance()
-        
+
         return actual
 
     def VerifyTokenType(self, tokenType):
@@ -608,37 +632,34 @@ class CompilationEngine:
 
     def EnterScope(self, name):
         self.Output("<{}>".format(name))
-        self.indentLevel += 1
+        self.indent_level += 1
 
     def ExitScope(self, name):
-        self.indentLevel -= 1
+        self.indent_level -= 1
         self.Output("</{}>".format(name))
 
-    def GetTopSymbolTable(self):
-        if len(self.symbolTables) != 0:
-            return self.symbolTables[len(self.symbolTables) - 1]
-        else:
-            return None
-
-    def ClassSymbolTableLookup(self, name, containingClass):   
-        return self.classToSymbolTable[containingClass].GetEntry(name)
+    def ClassSymbolTableLookup(self, name, containingClass):
+        return self.class_symbol_tables[containingClass].GetEntry(name)
 
     def SymbolTableLookup(self, name):
-        entry = self.localSymbolTable.GetEntry(name)
-        if entry != None:
+        entry = self.local_symbol_table.GetEntry(name)
+        if entry is not None:
             return entry
         else:
-            return self.ClassSymbolTableLookup(name, self.currentClassName)
+            return self.ClassSymbolTableLookup(name, self.current_class_name)
 
     def WriteCode(self, line):
-        self.codeFile.write(line + '\n')
+        self.code_file.write(line + '\n')
 
     def OutputTag(self, tag, value):
         self.Output("<{}> {} </{}>".format(tag, value, tag))
 
     def Output(self, text):
-        self.outputFile.write(("  " * self.indentLevel) + text + '\n')
-        # print ("  " * self.indentLevel) + text
+        self.output_file.write(("  " * self.indent_level) + text + '\n')
+
+    def GenerateUniqueLabel(self):
+        self.unique_label_index += 1
+        return "pfl{0}".format(self.unique_label_index - 1)
 
 
 def main(args):
@@ -652,7 +673,8 @@ def main(args):
 
     if not jack_file_path.endswith(".jack"):
         sources += [os.path.join(jack_file_path, source_file) for source_file
-                    in os.listdir(jack_file_path) if source_file.endswith('.jack')]
+                    in os.listdir(jack_file_path)
+                    if source_file.endswith('.jack')]
     else:
         sources = [jack_file_path]
 
@@ -661,7 +683,6 @@ def main(args):
         engine.SetClass(source_file, source_file.replace(".jack", ".vm"))
         engine.CompileClass()
 
-    #engine.WriteCode("call Main.main 0")
 
 if __name__ == '__main__':
     main(sys.argv[1:])
